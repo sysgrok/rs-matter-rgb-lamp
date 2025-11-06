@@ -5,8 +5,6 @@
 
 use core::pin::pin;
 
-use alloc::boxed::Box;
-
 use embassy_executor::Spawner;
 
 use esp_alloc::heap_allocator;
@@ -14,13 +12,10 @@ use esp_backtrace as _;
 use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
 use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::timer::timg::TimerGroup;
+use esp_metadata_generated::memory_range;
 use esp_storage::FlashStorage;
 
-#[cfg(feature = "defmt")]
-use defmt::{error, info};
-#[cfg(feature = "log")]
-use log::{error, info};
-
+use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -38,7 +33,6 @@ use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, 
 use rs_matter_embassy::matter::dm::{
     Async, Dataver, DeviceType, EmptyHandler, Endpoint, EpClMatcher, Node,
 };
-
 use rs_matter_embassy::matter::tlv::Nullable;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
 use rs_matter_embassy::matter::{clusters, devices};
@@ -48,23 +42,46 @@ use rs_matter_embassy::stack::persist::KvBlobStore;
 use rs_matter_embassy::wireless::esp::EspWifiDriver;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
-use embassy_embedded_hal::adapter::BlockingAsync;
-
 use matter_rgb_lamp::dm::color_control::{self, ClusterHandler as _};
 use matter_rgb_lamp::led::led_driver;
-
 use matter_rgb_lamp::led::led_handler::LedHandler;
+use matter_rgb_lamp::logging::{error, info};
 
 extern crate alloc;
 
+macro_rules! mk_static {
+    ($t:ty) => {{
+        #[cfg(not(feature = "esp32"))]
+        {
+            static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+            STATIC_CELL.uninit()
+        }
+        #[cfg(feature = "esp32")]
+        alloc::boxed::Box::leak(alloc::boxed::Box::<$t>::new_uninit())
+    }};
+}
+
+/// The amount of memory for allocating all `rs-matter-stack` futures created during
+/// the execution of the `run*` methods.
+/// This does NOT include the rest of the Matter stack.
+///
+/// The futures of `rs-matter-stack` created during the execution of the `run*` methods
+/// are allocated in a special way using a small bump allocator which results
+/// in a much lower memory usage by those.
+///
+/// If - for your platform - this size is not enough, increase it until
+/// the program runs without panics during the stack initialization.
 const BUMP_SIZE: usize = 18000;
 
+/// Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
+#[cfg(not(feature = "esp32"))]
+const HEAP_SIZE: usize = 100 * 1024;
+/// On the esp32, we allocate the Matter Stack from heap as well, due to the non-contiguous memory regions on that chip
 #[cfg(feature = "esp32")]
-const HEAP_SIZE: usize = 40 * 1024; // 40KB for ESP32, which has a disjoint heap
-#[cfg(any(feature = "esp32c3", feature = "esp32h2"))]
-const HEAP_SIZE: usize = 160 * 1024;
-#[cfg(not(any(feature = "esp32", feature = "esp32c3", feature = "esp32h2")))]
-const HEAP_SIZE: usize = 186 * 1024;
+const HEAP_SIZE: usize = 140 * 1024;
+
+const RECLAIMED_RAM: usize =
+    memory_range!("DRAM2_UNINIT").end - memory_range!("DRAM2_UNINIT").start;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -98,12 +115,8 @@ async fn main(_s: Spawner) {
 
     info!("Starting...");
 
-    // Heap strictly necessary only for Wifi+BLE and for the only Matter dependency which needs (~4KB) alloc - `x509`
-    // However since `esp32` specifically has a disjoint heap which causes bss size troubles, it is easier
-    // to allocate the statics once from heap as well
-    heap_allocator!(size: HEAP_SIZE);
-    #[cfg(feature = "esp32")]
-    heap_allocator!(#[link_section = ".dram2_uninit"] size: 96 * 1024);
+    heap_allocator!(size: HEAP_SIZE - RECLAIMED_RAM);
+    heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_RAM);
 
     // == Step 1: ==
     // Necessary `esp-hal` and `esp-wifi` initialization boilerplate
@@ -128,14 +141,9 @@ async fn main(_s: Spawner) {
     // Allocate the Matter stack.
     // For MCUs, it is best to allocate it statically, so as to avoid program stack blowups (its memory footprint is ~ 35 to 50KB).
     // It is also (currently) a mandatory requirement when the wireless stack variation is used.
-    let stack =
-        &*Box::leak(Box::new_uninit()).init_with(EmbassyWifiMatterStack::<BUMP_SIZE, ()>::init(
-            &TEST_DEV_DET,
-            TEST_DEV_COMM,
-            &TEST_DEV_ATT,
-            epoch,
-            esp_rand,
-        ));
+    let stack = mk_static!(EmbassyWifiMatterStack::<BUMP_SIZE, ()>).init_with(
+        EmbassyWifiMatterStack::init(&TEST_DEV_DET, TEST_DEV_COMM, &TEST_DEV_ATT, epoch, esp_rand),
+    );
 
     // == Step 3: ==
     // Set up Matter data model handler
@@ -240,7 +248,7 @@ async fn main(_s: Spawner) {
     let mut led_task = pin!(led_driver.run());
 
     // == Step 6: ==
-    // Setup reset button
+    // Setup Factory Reset button
     let mut button_reset = Input::new(
         peripherals.GPIO9,
         InputConfig::default().with_pull(Pull::Up),

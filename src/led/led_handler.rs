@@ -1,10 +1,12 @@
 use core::cell::{Cell, RefCell};
 use core::ops::{Add, Mul};
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, error};
-#[cfg(feature = "log")]
-use log::{debug, error};
+use esp_hal::Blocking;
+use esp_hal::analog::adc::{Adc, AdcPin};
+use esp_hal::gpio::Input;
+use esp_hal::peripherals::{ADC1, GPIO4};
+
+use embassy_time::Timer;
 
 use rs_matter::dm::clusters::level_control::OptionsBitmap;
 use rs_matter_embassy::matter::dm::Cluster;
@@ -14,14 +16,13 @@ use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::tlv::Nullable;
 use rs_matter_embassy::matter::with;
 
+use palette::white_point::D65;
+use palette::{FromColor, Srgb, Yxy};
+
+use crate::dm::color_control::ColorControlHooks;
+
 use crate::led::led_driver::{ControlMessage, LedSender};
-
-use esp_hal::Blocking;
-use esp_hal::analog::adc::{Adc, AdcPin};
-use esp_hal::gpio::Input;
-use esp_hal::peripherals::{ADC1, GPIO4};
-
-use embassy_time::Timer;
+use crate::logging::{debug, error};
 
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct LedHandler<'a> {
@@ -251,10 +252,6 @@ impl<'a> LevelControlHooks for LedHandler<'a> {
         }
     }
 }
-
-use crate::dm::color_control::ColorControlHooks;
-use palette::{FromColor, Srgb, Yxy};
-use palette::white_point::D65;
 
 impl<'a> ColorControlHooks for LedHandler<'a> {
     fn set_color(&self, x: u16, y: u16) -> Result<(), Error> {

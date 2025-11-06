@@ -1,21 +1,22 @@
 # Matter RGB lamp
 
-This projects builds a Matter enabled RGB lamp.
+This project builds a Matter enabled RGB lamp.
 
 The purpose of this project is to understand and demonstrate the user experience of the
 Rust implementation of Matter (`rs-matter`) and identify pain points for future 
 improvement of `rs-matter` and related crates.
 
-This projects uses [nix devenv](https://devenv.sh/) to maintain a reproducible setup.
+This project uses [nix devenv](https://devenv.sh/) to maintain a reproducible setup.
 
 ## Hardware
 
 Care has been taken to support most esp32 MCUs, however, this project has been tested on the following hardware setup.
 
-- **MCU**: esp32-c6, specifically ESP32-C6-DevKitM-1 V1.0
-- **Factory reset button**: GPIO9, the *boot* button on the devkit
-- **On/Off button**: GPIO7 with pull up
-- **Level control potentiometer**: ADC1 GPIO4
+- **MCU**: esp32c6 and esp32c3, specifically ESP32-C6-DevKitM-1 V1.0, WaveShare ESP32-C6 Zero and WaveShare ESP32-C3 Zero
+- **RGB led**: GPIO8, the RGB led on the above two boards
+- **Factory reset button**: GPIO9, the *boot* button on the above two boards
+- **On/Off button**: GPIO7 with pull up (needs to be attached externally)
+- **Level control potentiometer**: ADC1 GPIO4 (needs to be attached externally)
 
 ### Schematic
 

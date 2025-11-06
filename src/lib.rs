@@ -2,3 +2,4 @@
 
 pub mod dm;
 pub mod led;
+pub mod logging;

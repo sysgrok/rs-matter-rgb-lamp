@@ -1,11 +1,6 @@
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 
-#[cfg(feature = "defmt")]
-use defmt::{debug, warn};
-#[cfg(feature = "log")]
-use log::{debug, warn};
-
 use esp_hal::{
     gpio::AnyPin,
     peripherals,
@@ -13,7 +8,10 @@ use esp_hal::{
     time::Rate,
 };
 use esp_hal_smartled::{LedAdapterError, SmartLedsAdapterAsync, buffer_size_async};
+
 use smart_leds::{RGB8, SmartLedsWriteAsync, brightness, gamma};
+
+use crate::logging::{debug, warn};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {

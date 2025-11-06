@@ -1,14 +1,16 @@
 use core::cell::Cell;
-use log::{info, warn};
 
 use rs_matter_embassy::matter::dm::clusters::level_control::OptionsBitmap;
 use rs_matter_embassy::matter::dm::{Cluster, Dataver, InvokeContext, ReadContext, WriteContext};
 use rs_matter_embassy::matter::error::{Error, ErrorCode};
 use rs_matter_embassy::matter::tlv::Nullable;
-use rs_matter_embassy::matter::with;
+use rs_matter_embassy::matter::{import, with};
 
-pub use crate::dm::clusters::color_control::ClusterHandler;
-use crate::dm::clusters::color_control::*;
+use crate::logging::{debug, info, warn};
+
+pub use color_control::*;
+
+import!(ColorControl);
 
 pub struct ColorControlHandler<T: ColorControlHooks> {
     dataver: Dataver,
@@ -119,82 +121,82 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
     }
 
     fn current_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called current_x()");
+        debug!("ColorControl: Called current_x()");
         Ok(self.current_x.get())
     }
 
     fn current_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called current_y()");
+        debug!("ColorControl: Called current_y()");
         Ok(self.current_y.get())
     }
 
     fn primary_1_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_1_x()");
+        debug!("ColorControl: Called primary_1_x()");
         Ok(self.primary_1_x)
     }
 
     fn primary_1_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_1_y()");
+        debug!("ColorControl: Called primary_1_y()");
         Ok(self.primary_1_y)
     }
 
     fn primary_1_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        info!("ColorControl: Called primary_1_intensity()");
+        debug!("ColorControl: Called primary_1_intensity()");
         Ok(Nullable::some(self.primary_1_intensity))
     }
 
     fn primary_2_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_2_x()");
+        debug!("ColorControl: Called primary_2_x()");
         Ok(self.primary_2_x)
     }
 
     fn primary_2_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_2_y()");
+        debug!("ColorControl: Called primary_2_y()");
         Ok(self.primary_2_y)
     }
 
     fn primary_2_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        info!("ColorControl: Called primary_2_intensity()");
+        debug!("ColorControl: Called primary_2_intensity()");
         Ok(Nullable::some(self.primary_2_intensity))
     }
 
     fn primary_3_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_3_x()");
+        debug!("ColorControl: Called primary_3_x()");
         Ok(self.primary_3_x)
     }
 
     fn primary_3_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called primary_3_y()");
+        debug!("ColorControl: Called primary_3_y()");
         Ok(self.primary_3_y)
     }
 
     fn primary_3_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        info!("ColorControl: Called primary_3_intensity()");
+        debug!("ColorControl: Called primary_3_intensity()");
         Ok(Nullable::some(self.primary_3_intensity))
     }
 
     fn remaining_time(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called remaining_time()");
+        debug!("ColorControl: Called remaining_time()");
         Ok(self.remaining_time)
     }
 
     fn color_temperature_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called color_temperature_mireds()");
+        debug!("ColorControl: Called color_temperature_mireds()");
         Ok(self.color_temperature_mireds)
     }
 
     fn color_temp_physical_max_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called color_temp_physical_max_mireds()");
+        debug!("ColorControl: Called color_temp_physical_max_mireds()");
         Ok(self.color_temp_physical_max_mireds)
     }
 
     fn color_temp_physical_min_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called color_temp_physical_min_mireds()");
+        debug!("ColorControl: Called color_temp_physical_min_mireds()");
         Ok(self.color_temp_physical_min_mireds)
     }
 
     fn couple_color_temp_to_level_min_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called couple_color_temp_to_level_min_mireds()");
+        debug!("ColorControl: Called couple_color_temp_to_level_min_mireds()");
         Ok(self.couple_color_temp_to_level_min_mireds)
     }
 
@@ -202,32 +204,32 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         &self,
         _ctx: impl ReadContext,
     ) -> Result<Nullable<u16>, Error> {
-        info!("ColorControl: Called start_up_color_temperature_mireds()");
+        debug!("ColorControl: Called start_up_color_temperature_mireds()");
         Ok(Nullable::some(self.start_up_color_temperature_mireds))
     }
 
     fn color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
-        info!("ColorControl: Called color_mode()");
+        debug!("ColorControl: Called color_mode()");
         Ok(self.color_mode as u8)
     }
 
     fn options(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
-        info!("ColorControl: Called options()");
+        debug!("ColorControl: Called options()");
         Ok(self.options.bits())
     }
 
     fn number_of_primaries(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        info!("ColorControl: Called number_of_primaries()");
+        debug!("ColorControl: Called number_of_primaries()");
         Ok(Nullable::some(self.number_of_primes))
     }
 
     fn enhanced_color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
-        info!("ColorControl: Called enhanced_color_mode()");
+        debug!("ColorControl: Called enhanced_color_mode()");
         Ok(1) // todo needs fixing when enhanced color mode bitmap is included
     }
 
     fn color_capabilities(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        info!("ColorControl: Called color_capabilities()");
+        debug!("ColorControl: Called color_capabilities()");
         Ok(ColorCapabilities::XY_ATTRIBUTES_SUPPORTED.bits()
             | ColorCapabilities::COLOR_TEMPERATURE_SUPPORTED.bits())
     }
