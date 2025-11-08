@@ -1,5 +1,6 @@
-use core::cell::Cell;
+#![allow(async_fn_in_trait)]
 
+use rs_matter_embassy::matter::dm::HandlerContext;
 use rs_matter_embassy::matter::dm::clusters::level_control::OptionsBitmap;
 use rs_matter_embassy::matter::dm::{Cluster, Dataver, InvokeContext, ReadContext, WriteContext};
 use rs_matter_embassy::matter::error::{Error, ErrorCode};
@@ -12,104 +13,57 @@ pub use color_control::*;
 
 import!(ColorControl);
 
+// TODO: Future
+// #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+// #[cfg_attr(feature = "defmt", defmt::Format)]
+// pub enum Mode {
+//     Solid,
+//     Pulse { pulse_duration: u8 },
+//     ColourPulsing { pulse_duration: u8 },
+//     ColourChanging { speed: u8 },
+// }
+
 pub struct ColorControlHandler<T: ColorControlHooks> {
     dataver: Dataver,
-    handler: T,
-    current_x: Cell<u16>,
-    current_y: Cell<u16>,
-    color_mode: ColorMode,
+    hooks: T,
     options: OptionsBitmap,
-    number_of_primes: u8,
-    primary_1_x: u16,
-    primary_1_y: u16,
-    primary_1_intensity: u8,
-    primary_2_x: u16,
-    primary_2_y: u16,
-    primary_2_intensity: u8,
-    primary_3_x: u16,
-    primary_3_y: u16,
-    primary_3_intensity: u8,
-    // enhanced_color_mode: , // todo EnhancedColorModeEnum is not defined.
-    // color_capabilities: ColorCapabilitiesBitmap,
-    remaining_time: u16,
-    color_temperature_mireds: u16,
-    color_temp_physical_max_mireds: u16,
-    color_temp_physical_min_mireds: u16,
-    couple_color_temp_to_level_min_mireds: u16,
-    start_up_color_temperature_mireds: u16,
 }
 
 impl<T: ColorControlHooks> ColorControlHandler<T> {
-    pub fn new(dataver: Dataver, handler: T) -> Self {
+    pub fn new(dataver: Dataver, hooks: T) -> Self {
         Self {
             dataver,
-            handler,
-            current_x: Cell::new(39518), // white
-            current_y: Cell::new(21233),
-            color_mode: ColorMode::CurrentXAndCurrentY,
+            hooks,
             options: OptionsBitmap::empty(),
-            number_of_primes: 3,
-            primary_1_x: 0,
-            primary_1_y: 0,
-            primary_1_intensity: 0,
-            primary_2_x: 0,
-            primary_2_y: 0,
-            primary_2_intensity: 0,
-            primary_3_x: 0,
-            primary_3_y: 0,
-            primary_3_intensity: 0,
-            remaining_time: 0,
-            color_temperature_mireds: 0,
-            color_temp_physical_max_mireds: 0,
-            color_temp_physical_min_mireds: 0,
-            couple_color_temp_to_level_min_mireds: 0,
-            start_up_color_temperature_mireds: 0,
         }
     }
 
     /// Adapt the handler instance to the generic `rs-matter` `Handler` trait
-    pub const fn adapt(self) -> HandlerAdaptor<Self> {
-        HandlerAdaptor(self)
+    pub const fn adapt(self) -> HandlerAsyncAdaptor<Self> {
+        HandlerAsyncAdaptor(self)
     }
 }
 
-impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
+impl<T: ColorControlHooks> ClusterAsyncHandler for ColorControlHandler<T> {
     #[doc = "The cluster-metadata corresponding to this handler trait."]
     const CLUSTER: Cluster<'static> = FULL_CLUSTER
         .with_revision(7)
-        .with_features(Feature::XY.bits() | Feature::COLOR_TEMPERATURE.bits())
+        .with_features(Feature::XY.bits())
         .with_attrs(with!(
             required;
             AttributeId::CurrentX
             | AttributeId::CurrentY
             | AttributeId::ColorMode
             | AttributeId::Options
-            | AttributeId::NumberOfPrimaries
-            | AttributeId::Primary1X
-            | AttributeId::Primary1Y
-            | AttributeId::Primary1Intensity
-            | AttributeId::Primary2X
-            | AttributeId::Primary2Y
-            | AttributeId::Primary2Intensity
-            | AttributeId::Primary3X
-            | AttributeId::Primary3Y
-            | AttributeId::Primary3Intensity
             | AttributeId::EnhancedColorMode
             | AttributeId::ColorCapabilities
-            | AttributeId::RemainingTime
-            | AttributeId::ColorTemperatureMireds
-            | AttributeId::ColorTempPhysicalMaxMireds
-            | AttributeId::ColorTempPhysicalMinMireds
-            | AttributeId::CoupleColorTempToLevelMinMireds
-            | AttributeId::StartUpColorTemperatureMireds
+            | AttributeId::NumberOfPrimaries
         ))
         .with_cmds(with!(
             CommandId::MoveToColor
                 | CommandId::MoveColor
                 | CommandId::StepColor
                 | CommandId::StopMoveStep
-                | CommandId::MoveColorTemperature
-                | CommandId::StepColorTemperature
         ));
 
     fn dataver(&self) -> u32 {
@@ -120,128 +74,48 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         self.dataver.changed();
     }
 
-    fn current_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
+    async fn current_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
         debug!("ColorControl: Called current_x()");
-        Ok(self.current_x.get())
+        Ok(self.hooks.color().await.0)
     }
 
-    fn current_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
+    async fn current_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
         debug!("ColorControl: Called current_y()");
-        Ok(self.current_y.get())
+        Ok(self.hooks.color().await.1)
     }
 
-    fn primary_1_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_1_x()");
-        Ok(self.primary_1_x)
-    }
-
-    fn primary_1_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_1_y()");
-        Ok(self.primary_1_y)
-    }
-
-    fn primary_1_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        debug!("ColorControl: Called primary_1_intensity()");
-        Ok(Nullable::some(self.primary_1_intensity))
-    }
-
-    fn primary_2_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_2_x()");
-        Ok(self.primary_2_x)
-    }
-
-    fn primary_2_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_2_y()");
-        Ok(self.primary_2_y)
-    }
-
-    fn primary_2_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        debug!("ColorControl: Called primary_2_intensity()");
-        Ok(Nullable::some(self.primary_2_intensity))
-    }
-
-    fn primary_3_x(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_3_x()");
-        Ok(self.primary_3_x)
-    }
-
-    fn primary_3_y(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called primary_3_y()");
-        Ok(self.primary_3_y)
-    }
-
-    fn primary_3_intensity(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
-        debug!("ColorControl: Called primary_3_intensity()");
-        Ok(Nullable::some(self.primary_3_intensity))
-    }
-
-    fn remaining_time(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called remaining_time()");
-        Ok(self.remaining_time)
-    }
-
-    fn color_temperature_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called color_temperature_mireds()");
-        Ok(self.color_temperature_mireds)
-    }
-
-    fn color_temp_physical_max_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called color_temp_physical_max_mireds()");
-        Ok(self.color_temp_physical_max_mireds)
-    }
-
-    fn color_temp_physical_min_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called color_temp_physical_min_mireds()");
-        Ok(self.color_temp_physical_min_mireds)
-    }
-
-    fn couple_color_temp_to_level_min_mireds(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
-        debug!("ColorControl: Called couple_color_temp_to_level_min_mireds()");
-        Ok(self.couple_color_temp_to_level_min_mireds)
-    }
-
-    fn start_up_color_temperature_mireds(
-        &self,
-        _ctx: impl ReadContext,
-    ) -> Result<Nullable<u16>, Error> {
-        debug!("ColorControl: Called start_up_color_temperature_mireds()");
-        Ok(Nullable::some(self.start_up_color_temperature_mireds))
-    }
-
-    fn color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+    async fn color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
         debug!("ColorControl: Called color_mode()");
-        Ok(self.color_mode as u8)
+        Ok(ColorMode::CurrentXAndCurrentY as _)
     }
 
-    fn options(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+    async fn options(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
         debug!("ColorControl: Called options()");
         Ok(self.options.bits())
     }
 
-    fn number_of_primaries(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
+    async fn number_of_primaries(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
         debug!("ColorControl: Called number_of_primaries()");
-        Ok(Nullable::some(self.number_of_primes))
+        Ok(Nullable::some(0))
     }
 
-    fn enhanced_color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
+    async fn enhanced_color_mode(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
         debug!("ColorControl: Called enhanced_color_mode()");
         Ok(1) // todo needs fixing when enhanced color mode bitmap is included
     }
 
-    fn color_capabilities(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
+    async fn color_capabilities(&self, _ctx: impl ReadContext) -> Result<u16, Error> {
         debug!("ColorControl: Called color_capabilities()");
-        Ok(ColorCapabilities::XY_ATTRIBUTES_SUPPORTED.bits()
-            | ColorCapabilities::COLOR_TEMPERATURE_SUPPORTED.bits())
+        Ok(ColorCapabilities::XY_ATTRIBUTES_SUPPORTED.bits())
     }
 
-    fn set_options(&self, _ctx: impl WriteContext, _value: u8) -> Result<(), Error> {
+    async fn set_options(&self, _ctx: impl WriteContext, _value: u8) -> Result<(), Error> {
         info!("ColorControl: Called set_options()");
-        // todo is `&self` correct? We should be able to modify self if we want to set a value.
         warn!("Not yet implemented. Doing nothing.");
         Ok(())
     }
 
-    fn handle_move_to_hue(
+    async fn handle_move_to_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveToHueRequest<'_>,
@@ -250,7 +124,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_move_hue(
+    async fn handle_move_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveHueRequest<'_>,
@@ -259,7 +133,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_step_hue(
+    async fn handle_step_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: StepHueRequest<'_>,
@@ -268,7 +142,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_move_to_saturation(
+    async fn handle_move_to_saturation(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveToSaturationRequest<'_>,
@@ -277,7 +151,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_move_saturation(
+    async fn handle_move_saturation(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveSaturationRequest<'_>,
@@ -286,7 +160,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_step_saturation(
+    async fn handle_step_saturation(
         &self,
         _ctx: impl InvokeContext,
         _request: StepSaturationRequest<'_>,
@@ -295,7 +169,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_move_to_hue_and_saturation(
+    async fn handle_move_to_hue_and_saturation(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveToHueAndSaturationRequest<'_>,
@@ -304,22 +178,24 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_move_to_color(
+    async fn handle_move_to_color(
         &self,
-        _ctx: impl InvokeContext,
+        ctx: impl InvokeContext,
         request: MoveToColorRequest<'_>,
     ) -> Result<(), Error> {
         info!("ColorControl: Called handle_move_to_color()");
         // todo process options
-        self.handler
-            .set_color(request.color_x()?, request.color_y()?)?;
+        self.hooks
+            .set_color(request.color_x()?, request.color_y()?)
+            .await?;
 
-        self.current_x.set(request.color_x()?);
-        self.current_y.set(request.color_y()?);
+        self.dataver_changed();
+        ctx.notify_changed();
+
         Ok(())
     }
 
-    fn handle_move_color(
+    async fn handle_move_color(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveColorRequest<'_>,
@@ -329,7 +205,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Ok(())
     }
 
-    fn handle_step_color(
+    async fn handle_step_color(
         &self,
         _ctx: impl InvokeContext,
         _request: StepColorRequest<'_>,
@@ -339,7 +215,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Ok(())
     }
 
-    fn handle_move_to_color_temperature(
+    async fn handle_move_to_color_temperature(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveToColorTemperatureRequest<'_>,
@@ -349,7 +225,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Ok(())
     }
 
-    fn handle_enhanced_move_to_hue(
+    async fn handle_enhanced_move_to_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: EnhancedMoveToHueRequest<'_>,
@@ -358,7 +234,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_enhanced_move_hue(
+    async fn handle_enhanced_move_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: EnhancedMoveHueRequest<'_>,
@@ -367,7 +243,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_enhanced_step_hue(
+    async fn handle_enhanced_step_hue(
         &self,
         _ctx: impl InvokeContext,
         _request: EnhancedStepHueRequest<'_>,
@@ -376,7 +252,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_enhanced_move_to_hue_and_saturation(
+    async fn handle_enhanced_move_to_hue_and_saturation(
         &self,
         _ctx: impl InvokeContext,
         _request: EnhancedMoveToHueAndSaturationRequest<'_>,
@@ -385,7 +261,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_color_loop_set(
+    async fn handle_color_loop_set(
         &self,
         _ctx: impl InvokeContext,
         _request: ColorLoopSetRequest<'_>,
@@ -394,7 +270,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Err(ErrorCode::InvalidCommand.into())
     }
 
-    fn handle_stop_move_step(
+    async fn handle_stop_move_step(
         &self,
         _ctx: impl InvokeContext,
         _request: StopMoveStepRequest<'_>,
@@ -404,7 +280,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Ok(())
     }
 
-    fn handle_move_color_temperature(
+    async fn handle_move_color_temperature(
         &self,
         _ctx: impl InvokeContext,
         _request: MoveColorTemperatureRequest<'_>,
@@ -414,7 +290,7 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         Ok(())
     }
 
-    fn handle_step_color_temperature(
+    async fn handle_step_color_temperature(
         &self,
         _ctx: impl InvokeContext,
         _request: StepColorTemperatureRequest<'_>,
@@ -423,18 +299,38 @@ impl<T: ColorControlHooks> ClusterHandler for ColorControlHandler<T> {
         warn!("Not yet implemented. Doing nothing.");
         Ok(())
     }
+
+    async fn run(&self, _ctx: impl HandlerContext) -> Result<(), Error> {
+        self.hooks.run().await;
+
+        Ok(())
+    }
 }
 
 pub trait ColorControlHooks {
+    async fn color(&self) -> (u16, u16);
+
     // todo add the transition time
-    fn set_color(&self, x: u16, y: u16) -> Result<(), Error>;
+    async fn set_color(&self, x: u16, y: u16) -> Result<(), Error>;
+
+    async fn run(&self) {
+        core::future::pending().await
+    }
 }
 
 impl<T> ColorControlHooks for &T
 where
     T: ColorControlHooks,
 {
-    fn set_color(&self, x: u16, y: u16) -> Result<(), Error> {
+    fn color(&self) -> impl Future<Output = (u16, u16)> {
+        (*self).color()
+    }
+
+    fn set_color(&self, x: u16, y: u16) -> impl Future<Output = Result<(), Error>> {
         (*self).set_color(x, y)
+    }
+
+    fn run(&self) -> impl Future<Output = ()> {
+        (*self).run()
     }
 }

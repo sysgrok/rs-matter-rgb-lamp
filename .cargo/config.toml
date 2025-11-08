@@ -25,3 +25,4 @@ build-std = ["core", "alloc", "panic_abort"]
 
 [env]
 DEFMT_LOG = "info"
+ESP_LOG = "info"

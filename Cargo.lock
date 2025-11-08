@@ -368,9 +368,9 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "cc"
-version = "1.2.44"
+version = "1.2.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37521ac7aabe3d13122dc382493e20c9416f299d2ccd5b3a5340a2570cdeb0f3"
+checksum = "35900b6c8d709fb1d854671ae27aeaa9eec2f8b01b364e1619a40da3e6fe2afe"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -1575,7 +1575,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-smartled"
 version = "0.17.0"
-source = "git+https://github.com/esp-rs/esp-hal-community.git?rev=ab4316534d90e3a12785907f043f6899faee0f20#ab4316534d90e3a12785907f043f6899faee0f20"
+source = "git+https://github.com/esp-rs/esp-hal-community?rev=ab4316534d90e3a12785907f043f6899faee0f20#ab4316534d90e3a12785907f043f6899faee0f20"
 dependencies = [
  "document-features",
  "esp-hal",
@@ -2302,22 +2302,22 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 
 [[package]]
 name = "jiff"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be1f93b8b1eb69c77f24bbb0afdf66f54b632ee39af40ca21c4365a1d7347e49"
+checksum = "49cce2b81f2098e7e3efc35bc2e0a6b7abec9d34128283d7a26fa8f32a6dbb35"
 dependencies = [
  "jiff-static",
  "log",
  "portable-atomic",
  "portable-atomic-util",
- "serde",
+ "serde_core",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03343451ff899767262ec32146f6d559dd759fdadf42ff0e227c7c48f72594b4"
+checksum = "980af8b43c3ad5d8d349ace167ec8170839f753a42d233ba19e08afe1850fa69"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2815,7 +2815,7 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 [[package]]
 name = "openthread"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/openthread.git?branch=next#8e1afd5867db7e56cc18818083ba7e2c587f6d39"
+source = "git+https://github.com/sysgrok/openthread?branch=next#8e1afd5867db7e56cc18818083ba7e2c587f6d39"
 dependencies = [
  "bitflags 2.10.0",
  "defmt 1.0.1",
@@ -2836,7 +2836,7 @@ dependencies = [
 [[package]]
 name = "openthread-sys"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/openthread.git?branch=next#8e1afd5867db7e56cc18818083ba7e2c587f6d39"
+source = "git+https://github.com/sysgrok/openthread?branch=next#8e1afd5867db7e56cc18818083ba7e2c587f6d39"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -3186,9 +3186,9 @@ checksum = "d0e2c0bf8be8a1c4a4f48973dabf26943f05da2bfc2d3180aae62409dbba6f0c"
 
 [[package]]
 name = "quote"
-version = "1.0.41"
+version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce25767e7b499d1b604768e7cde645d14cc8584231ea6b295e9c9eb22c02e1d1"
+checksum = "a338cc41d27e6cc6dce6cefc13a0729dfbb81c262b1f519331575dd80ef3067f"
 dependencies = [
  "proc-macro2",
 ]
@@ -3368,7 +3368,7 @@ dependencies = [
 [[package]]
 name = "rs-matter"
 version = "0.1.1"
-source = "git+https://github.com/project-chip/rs-matter#270cb02617bd9375e08e485fbf653c54696bb8dd"
+source = "git+https://github.com/sysgrok/rs-matter?branch=next#74b6c8977352a6e3ec32cac0150b0e302af3038f"
 dependencies = [
  "aes",
  "bitflags 2.10.0",
@@ -3413,7 +3413,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-embassy"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-embassy.git#a80b486c15dc4dc42058b0bb7c92bc9740871688"
+source = "git+https://github.com/sysgrok/rs-matter-embassy#a80b486c15dc4dc42058b0bb7c92bc9740871688"
 dependencies = [
  "bt-hci 0.6.0",
  "cyw43",
@@ -3442,7 +3442,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-macros"
 version = "0.1.0"
-source = "git+https://github.com/project-chip/rs-matter#270cb02617bd9375e08e485fbf653c54696bb8dd"
+source = "git+https://github.com/sysgrok/rs-matter?branch=next#74b6c8977352a6e3ec32cac0150b0e302af3038f"
 dependencies = [
  "convert_case 0.6.0",
  "miette",
@@ -3462,7 +3462,7 @@ dependencies = [
 [[package]]
 name = "rs-matter-stack"
 version = "0.1.0"
-source = "git+https://github.com/sysgrok/rs-matter-stack.git?branch=master#8f41615e2f2a7ecbaee1af414225ff942f717f74"
+source = "git+https://github.com/sysgrok/rs-matter-stack?branch=next#7c0f2b6f48d71d22091248f4244764dd0b1d7f77"
 dependencies = [
  "bitflags 2.10.0",
  "cfg-if",

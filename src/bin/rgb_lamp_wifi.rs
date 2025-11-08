@@ -7,22 +7,15 @@ use core::pin::pin;
 
 use embassy_executor::Spawner;
 
+use embassy_futures::select::select;
 use esp_alloc::heap_allocator;
 use esp_backtrace as _;
-use esp_hal::analog::adc::{Adc, AdcConfig, Attenuation};
-use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::peripherals::{ADC1, GPIO4};
 use esp_hal::timer::timg::TimerGroup;
 use esp_metadata_generated::memory_range;
-use esp_storage::FlashStorage;
-
-use embassy_embedded_hal::adapter::BlockingAsync;
-use embassy_futures::select::{Either, Either3, select, select3};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_time::Timer;
 
 use rs_matter_embassy::epoch::epoch;
-use rs_matter_embassy::matter::dm::clusters::desc::{self, ClusterHandler as _};
+use rs_matter_embassy::matter::dm::clusters::desc::{ClusterHandler as _, DescHandler};
 use rs_matter_embassy::matter::dm::clusters::level_control::{
     self, AttributeDefaults, ClusterAsyncHandler as _, LevelControlHandler, OptionsBitmap,
 };
@@ -33,23 +26,32 @@ use rs_matter_embassy::matter::dm::devices::test::{TEST_DEV_ATT, TEST_DEV_COMM, 
 use rs_matter_embassy::matter::dm::{
     Async, Dataver, DeviceType, EmptyHandler, Endpoint, EpClMatcher, Node,
 };
+use rs_matter_embassy::matter::error::Error;
 use rs_matter_embassy::matter::tlv::Nullable;
 use rs_matter_embassy::matter::utils::init::InitMaybeUninit;
+use rs_matter_embassy::matter::utils::select::Coalesce;
 use rs_matter_embassy::matter::{clusters, devices};
-use rs_matter_embassy::persist::EmbassyKvBlobStore;
 use rs_matter_embassy::rand::esp::{esp_init_rand, esp_rand};
-use rs_matter_embassy::stack::persist::KvBlobStore;
+use rs_matter_embassy::stack::persist::{KvBlobStore, MatterPersist, NetworkPersist};
 use rs_matter_embassy::wireless::esp::EspWifiDriver;
 use rs_matter_embassy::wireless::{EmbassyWifi, EmbassyWifiMatterStack};
 
-use matter_rgb_lamp::dm::color_control::{self, ClusterHandler as _};
-use matter_rgb_lamp::led::led_driver;
-use matter_rgb_lamp::led::led_handler::LedHandler;
-use matter_rgb_lamp::logging::{error, info};
+use matter_rgb_lamp::dm::color_control::{ClusterAsyncHandler as _, ColorControlHandler};
+use matter_rgb_lamp::led::Led;
+use matter_rgb_lamp::logging::{info, warn};
 
 extern crate alloc;
 
 macro_rules! mk_static {
+    ($t:ty, $v:expr) => {{
+        #[cfg(not(feature = "esp32"))]
+        {
+            static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write($v)
+        }
+        #[cfg(feature = "esp32")]
+        alloc::boxed::Box::leak(alloc::boxed::Box::<$t>::new($v))
+    }};
     ($t:ty) => {{
         #[cfg(not(feature = "esp32"))]
         {
@@ -85,33 +87,15 @@ const RECLAIMED_RAM: usize =
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-fn get_persistent_store() -> impl KvBlobStore {
-    use esp_bootloader_esp_idf::partitions::{
-        DataPartitionSubType, PARTITION_TABLE_MAX_LEN, PartitionType, read_partition_table,
-    };
-
-    let mut flash = FlashStorage::new();
-    let mut pt_mem = [0u8; PARTITION_TABLE_MAX_LEN];
-    let pt = read_partition_table(&mut flash, &mut pt_mem).unwrap();
-    let nvs = pt
-        .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
-        .unwrap()
-        .unwrap();
-
-    let start = nvs.offset();
-    let end = nvs.offset() + nvs.len();
-    info!("Found persistent partition at {:#x}..{:#x}", start, end);
-
-    EmbassyKvBlobStore::new(BlockingAsync::new(flash), start..end)
-}
-
 #[cfg(feature = "defmt")]
 use esp_println as _;
+
+type LedHw<'a> = Led<'a, ADC1<'a>, GPIO4<'a>>;
 
 #[esp_rtos::main]
 async fn main(_s: Spawner) {
     #[cfg(feature = "log")]
-    esp_println::logger::init_logger(log::LevelFilter::Info);
+    esp_println::logger::init_logger_from_env();
 
     info!("Starting...");
 
@@ -147,29 +131,31 @@ async fn main(_s: Spawner) {
 
     // == Step 3: ==
     // Set up Matter data model handler
-    let channel = Channel::<CriticalSectionRawMutex, led_driver::ControlMessage, 4>::new();
-    let sender = channel.sender();
 
-    let button_on_off = Input::new(
-        peripherals.GPIO7,
-        InputConfig::default().with_pull(Pull::Up),
+    // Setup our hardware
+    let led = LedHw::new(
+        peripherals.RMT,
+        peripherals.GPIO8,
+        peripherals.GPIO9,
+        #[cfg(feature = "adc")]
+        {
+            Some((peripherals.ADC1, peripherals.GPIO4))
+        },
+        #[cfg(not(feature = "adc"))]
+        {
+            Option::<(ADC1, GPIO4)>::None
+        },
     );
-
-    let mut adc1_config = AdcConfig::new();
-    let pin = adc1_config.enable_pin(peripherals.GPIO4, Attenuation::_11dB);
-    let adc1 = Adc::new(peripherals.ADC1, adc1_config);
-
-    let led_handler = LedHandler::new(sender, button_on_off, adc1, pin);
 
     let on_off_handler = OnOffHandler::new(
         Dataver::new_rand(stack.matter().rand()),
         LIGHT_ENDPOINT_ID,
-        &led_handler,
+        &led,
     );
     let level_control_handler = LevelControlHandler::new(
         Dataver::new_rand(stack.matter().rand()),
         LIGHT_ENDPOINT_ID,
-        &led_handler,
+        &led,
         AttributeDefaults {
             on_level: Nullable::none(),
             options: OptionsBitmap::EXECUTE_IF_OFF,
@@ -185,53 +171,46 @@ async fn main(_s: Spawner) {
         .chain(
             EpClMatcher::new(
                 Some(LIGHT_ENDPOINT_ID),
-                Some(OnOffHandler::<LedHandler, LedHandler>::CLUSTER.id),
+                Some(OnOffHandler::<LedHw, LedHw>::CLUSTER.id),
             ),
             on_off::HandlerAsyncAdaptor(&on_off_handler),
         )
         .chain(
             EpClMatcher::new(
                 Some(LIGHT_ENDPOINT_ID),
-                Some(LevelControlHandler::<LedHandler, LedHandler>::CLUSTER.id),
+                Some(LevelControlHandler::<LedHw, LedHw>::CLUSTER.id),
             ),
             level_control::HandlerAsyncAdaptor(&level_control_handler),
         )
         .chain(
             EpClMatcher::new(
                 Some(LIGHT_ENDPOINT_ID),
-                Some(color_control::ColorControlHandler::<LedHandler>::CLUSTER.id),
+                Some(ColorControlHandler::<LedHw>::CLUSTER.id),
             ),
-            Async(
-                color_control::ColorControlHandler::new(
-                    Dataver::new_rand(stack.matter().rand()),
-                    &led_handler,
-                )
-                .adapt(),
-            ),
+            ColorControlHandler::new(Dataver::new_rand(stack.matter().rand()), &led).adapt(),
         )
         .chain(
-            EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(desc::DescHandler::CLUSTER.id)),
-            Async(desc::DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
+            EpClMatcher::new(Some(LIGHT_ENDPOINT_ID), Some(DescHandler::CLUSTER.id)),
+            Async(DescHandler::new(Dataver::new_rand(stack.matter().rand())).adapt()),
         );
 
     // == Step 4: ==
     // Run the Matter stack with our handler
-    // Using `pin!` is completely optional, but reduces the size of the final future
 
     // Create the persister & load any previously saved state
     // `EmbassyPersist`+`EmbassyKvBlobStore` saves to a user-supplied NOR Flash region
     // However, for this demo and for simplicity, we use a dummy persister that does nothing
     let persist = stack
-        .create_persist_with_comm_window(get_persistent_store())
+        .create_persist_with_comm_window(create_blob_store())
         .await
         .unwrap();
 
     // This step can be repeated in that the stack can be stopped and started multiple times, as needed.
-    let mut matter = pin!(stack.run_coex(
+    let mut matter_task = pin!(stack.run_coex(
         // The Matter stack needs to instantiate an `embassy-net` `Driver` and `Controller`
         EmbassyWifi::new(
             EspWifiDriver::new(&init, peripherals.WIFI, peripherals.BT),
-            stack
+            stack,
         ),
         // The Matter stack needs a persister to store its state
         &persist,
@@ -241,50 +220,60 @@ async fn main(_s: Spawner) {
         (),
     ));
 
-    // == Step 5: ==
-    // Setup the LED driver
-    let receiver = channel.receiver();
-    let led_driver = led_driver::Driver::new(peripherals.RMT, peripherals.GPIO8.into(), receiver);
-    let mut led_task = pin!(led_driver.run());
+    let mut reset_task = pin!(factory_reset(&led, &persist));
 
-    // == Step 6: ==
-    // Setup Factory Reset button
-    let mut button_reset = Input::new(
-        peripherals.GPIO9,
-        InputConfig::default().with_pull(Pull::Up),
-    );
+    select(&mut matter_task, &mut reset_task)
+        .coalesce()
+        .await
+        .unwrap();
+}
 
-    // Hold for 3 seconds to initiate a factory reset
-    let mut reset_button_task = async || {
-        loop {
-            button_reset.wait_for_falling_edge().await;
-            match select(button_reset.wait_for_rising_edge(), Timer::after_secs(3)).await {
-                Either::First(_) => (),
-                Either::Second(_) => {
-                    info!("Performing factory reset...");
-                    if let Err(e) = persist.reset().await {
-                        error!("Factory reset error: {}", e);
-                    };
-                    // todo reset non-volatile attributes.
-                    // todo Consider adding a `reset()` method to the rs-matter handlers.
-                }
-            }
-        }
-    };
+async fn factory_reset<S, C>(
+    led: &LedHw<'_>,
+    persist: &MatterPersist<'_, S, C>,
+) -> Result<(), Error>
+where
+    S: KvBlobStore,
+    C: NetworkPersist,
+{
+    loop {
+        led.wait_factory_reset().await;
 
-    // == Step 7: ==
-    // Run async tasks
-    match select3(&mut matter, &mut led_task, &mut pin!(reset_button_task())).await {
-        Either3::First(r) => {
-            panic!("Matter thread exited! {:?}", r)
-        }
-        Either3::Second(_) => {
-            panic!("LED thread exited!")
-        }
-        Either3::Third(_) => {
-            panic!("Reset button thread exited!")
-        }
+        warn!("Performing factory reset...");
+
+        let _ = persist.reset().await;
+
+        info!("Factory reset complete. Restart the device to re-provision.");
     }
+}
+
+#[cfg(feature = "persist")]
+fn create_blob_store() -> impl KvBlobStore {
+    use embassy_embedded_hal::adapter::BlockingAsync;
+    use esp_bootloader_esp_idf::partitions::{
+        DataPartitionSubType, PARTITION_TABLE_MAX_LEN, PartitionType, read_partition_table,
+    };
+    use esp_storage::FlashStorage;
+    use rs_matter_embassy::persist::EmbassyKvBlobStore;
+
+    let mut flash = FlashStorage::new();
+    let mut pt_mem = [0u8; PARTITION_TABLE_MAX_LEN];
+    let pt = read_partition_table(&mut flash, &mut pt_mem).unwrap();
+    let nvs = pt
+        .find_partition(PartitionType::Data(DataPartitionSubType::Nvs))
+        .unwrap()
+        .unwrap();
+
+    let start = nvs.offset();
+    let end = nvs.offset() + nvs.len();
+    info!("Found persistent partition at {:#x}..{:#x}", start, end);
+
+    EmbassyKvBlobStore::new(BlockingAsync::new(flash), start..end)
+}
+
+#[cfg(not(feature = "persist"))]
+fn create_blob_store() -> impl KvBlobStore {
+    rs_matter_embassy::stack::persist::DummyKvBlobStore
 }
 
 /// Endpoint 0 (the root endpoint) always runs
@@ -305,10 +294,10 @@ const NODE: Node = Node {
             id: LIGHT_ENDPOINT_ID,
             device_types: devices!(DEV_TYPE_ENHANCED_COLOR_LIGHT),
             clusters: clusters!(
-                desc::DescHandler::CLUSTER,
-                OnOffHandler::<LedHandler, LedHandler>::CLUSTER,
-                LevelControlHandler::<LedHandler, LedHandler>::CLUSTER
-                color_control::ColorControlHandler::<LedHandler>::CLUSTER
+                DescHandler::CLUSTER,
+                OnOffHandler::<LedHw, LedHw>::CLUSTER,
+                LevelControlHandler::<LedHw, LedHw>::CLUSTER
+                ColorControlHandler::<LedHw>::CLUSTER
             ),
         },
     ],
