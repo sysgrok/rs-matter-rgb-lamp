@@ -1,5 +1,7 @@
 #![allow(async_fn_in_trait)]
 
+use core::cell::Cell;
+
 use rs_matter_embassy::matter::dm::HandlerContext;
 use rs_matter_embassy::matter::dm::clusters::level_control::OptionsBitmap;
 use rs_matter_embassy::matter::dm::{Cluster, Dataver, InvokeContext, ReadContext, WriteContext};
@@ -26,7 +28,7 @@ import!(ColorControl);
 pub struct ColorControlHandler<T: ColorControlHooks> {
     dataver: Dataver,
     hooks: T,
-    options: OptionsBitmap,
+    options: Cell<OptionsBitmap>,
 }
 
 impl<T: ColorControlHooks> ColorControlHandler<T> {
@@ -34,13 +36,24 @@ impl<T: ColorControlHooks> ColorControlHandler<T> {
         Self {
             dataver,
             hooks,
-            options: OptionsBitmap::empty(),
+            options: Cell::new(OptionsBitmap::empty()),
         }
     }
 
     /// Adapt the handler instance to the generic `rs-matter` `Handler` trait
     pub const fn adapt(self) -> HandlerAsyncAdaptor<Self> {
         HandlerAsyncAdaptor(self)
+    }
+
+    fn execute_if_off(&self, options_mask: u8, options_override: u8) -> bool {
+        let mask = OptionsBitmap::from_bits_truncate(options_mask);
+
+        if mask.contains(OptionsBitmap::EXECUTE_IF_OFF) {
+            OptionsBitmap::from_bits_truncate(options_override)
+                .contains(OptionsBitmap::EXECUTE_IF_OFF)
+        } else {
+            self.options.get().contains(OptionsBitmap::EXECUTE_IF_OFF)
+        }
     }
 }
 
@@ -91,7 +104,7 @@ impl<T: ColorControlHooks> ClusterAsyncHandler for ColorControlHandler<T> {
 
     async fn options(&self, _ctx: impl ReadContext) -> Result<u8, Error> {
         debug!("ColorControl: Called options()");
-        Ok(self.options.bits())
+        Ok(self.options.get().bits())
     }
 
     async fn number_of_primaries(&self, _ctx: impl ReadContext) -> Result<Nullable<u8>, Error> {
@@ -109,9 +122,14 @@ impl<T: ColorControlHooks> ClusterAsyncHandler for ColorControlHandler<T> {
         Ok(ColorCapabilities::XY_ATTRIBUTES_SUPPORTED.bits())
     }
 
-    async fn set_options(&self, _ctx: impl WriteContext, _value: u8) -> Result<(), Error> {
+    async fn set_options(&self, ctx: impl WriteContext, value: u8) -> Result<(), Error> {
         info!("ColorControl: Called set_options()");
-        warn!("Not yet implemented. Doing nothing.");
+        if self.options.get() != OptionsBitmap::from_bits_truncate(value) {
+            self.options.set(OptionsBitmap::from_bits_truncate(value));
+            self.dataver_changed();
+            ctx.notify_changed();
+        }
+
         Ok(())
     }
 
@@ -184,13 +202,19 @@ impl<T: ColorControlHooks> ClusterAsyncHandler for ColorControlHandler<T> {
         request: MoveToColorRequest<'_>,
     ) -> Result<(), Error> {
         info!("ColorControl: Called handle_move_to_color()");
-        // todo process options
-        self.hooks
-            .set_color(request.color_x()?, request.color_y()?)
-            .await?;
 
-        self.dataver_changed();
-        ctx.notify_changed();
+        if self
+            .hooks
+            .set_color(
+                request.color_x()?,
+                request.color_y()?,
+                self.execute_if_off(request.options_mask()?, request.options_override()?),
+            )
+            .await?
+        {
+            self.dataver_changed();
+            ctx.notify_changed();
+        }
 
         Ok(())
     }
@@ -311,7 +335,7 @@ pub trait ColorControlHooks {
     async fn color(&self) -> (u16, u16);
 
     // todo add the transition time
-    async fn set_color(&self, x: u16, y: u16) -> Result<(), Error>;
+    async fn set_color(&self, x: u16, y: u16, execute_if_off: bool) -> Result<bool, Error>;
 
     async fn run(&self) {
         core::future::pending().await
@@ -326,8 +350,13 @@ where
         (*self).color()
     }
 
-    fn set_color(&self, x: u16, y: u16) -> impl Future<Output = Result<(), Error>> {
-        (*self).set_color(x, y)
+    fn set_color(
+        &self,
+        x: u16,
+        y: u16,
+        execute_if_off: bool,
+    ) -> impl Future<Output = Result<bool, Error>> {
+        (*self).set_color(x, y, execute_if_off)
     }
 
     fn run(&self) -> impl Future<Output = ()> {

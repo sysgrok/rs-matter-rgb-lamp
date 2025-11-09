@@ -98,8 +98,8 @@ impl<'a, A: adc::Instance + adc::RegisterAccess + 'a, AC: AdcChannel + AnalogPin
             }),
             state_signal: Signal::new(),
             factory_reset_signal: Signal::new(),
-            start_up_on_off: Cell::new(None),
-            startup_current_level: Cell::new(None),
+            start_up_on_off: Cell::new(Some(StartUpOnOffEnum::Off)),
+            startup_current_level: Cell::new(Some(100)),
         };
 
         this.state_signal.signal(this.state.get());
@@ -349,14 +349,19 @@ impl<'a, A: adc::Instance + adc::RegisterAccess + 'a, AC: AdcChannel + AnalogPin
         (state.x, state.y)
     }
 
-    async fn set_color(&self, x: u16, y: u16) -> Result<(), Error> {
-        self.set_state(LedState {
-            x,
-            y,
-            ..self.state.get()
-        });
+    async fn set_color(&self, x: u16, y: u16, execute_if_off: bool) -> Result<bool, Error> {
+        if !self.state.get().on || execute_if_off {
+            self.set_state(LedState {
+                x,
+                y,
+                ..self.state.get()
+            });
 
-        Ok(())
+            Ok(true)
+        } else {
+            info!("Not setting color because LED is off");
+            Ok(false)
+        }
     }
 
     async fn run(&self) {
